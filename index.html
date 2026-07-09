@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FactoryXChange 2.0 — Service Map</title>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+  :root {
+    --ink: #1f2933; --muted: #6b7885; --line: #e2e7ec;
+    --hub: #16697a; --partner: #4a5a6a; --bg: #f7f9fb;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); }
+  #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+
+  header { background: #12333b; color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 700; }
+  header .sub { font-size: 12.5px; color: #a9c4cc; }
+  header .tools { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #search { padding: 7px 12px; border-radius: 7px; border: 1px solid #2c4f57; background: #0e2a31; color: #fff; width: 260px; font-size: 13px; }
+  #search::placeholder { color: #7fa0a9; }
+  button.tool { background: #1d4650; color: #d7e7eb; border: 1px solid #2c4f57; padding: 7px 12px; border-radius: 7px; font-size: 12.5px; cursor: pointer; }
+  button.tool:hover { background: #276069; }
+  button#askAi { background: #f4f8fa; color: #12333b; border-color: #dbe6ea; font-weight: 600; }
+  button#askAi:hover { background: #e9f0f3; }
+  label.toggle { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #cfe1e6; cursor: pointer; user-select: none; }
+  label.toggle input { accent-color: #58b4c4; cursor: pointer; }
+
+  #main { position: relative; overflow: hidden; }
+  #graph { position: absolute; inset: 0; background: var(--bg); }
+
+  /* pillar filter chips */
+  #pillars { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 6px; background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.06); z-index: 5; }
+  #pillars .lg-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 2px; }
+  .chip { display: flex; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer; padding: 2px 4px; border-radius: 6px; user-select: none; }
+  .chip:hover { background: #eef2f5; }
+  .chip.off { opacity: .35; }
+  .dot { width: 13px; height: 13px; border-radius: 50%; flex: none; }
+  .swatch-hub { width: 13px; height: 13px; border-radius: 50%; background: var(--hub); }
+  .swatch-partner { width: 15px; height: 11px; border-radius: 3px; background: var(--partner); }
+
+  /* node-type key */
+  #key { position: absolute; bottom: 58px; left: 12px; background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font-size: 12px; z-index: 5; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+  #ghBtn { position: absolute; bottom: 12px; left: 12px; z-index: 6; display: inline-flex; align-items: center; gap: 7px; background: #12333b; color: #fff; padding: 8px 13px; border-radius: 20px; font-size: 12.5px; text-decoration: none; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  #ghBtn:hover { background: #1d4650; }
+  #ghBtn svg { width: 16px; height: 16px; }
+  #key .k { display: flex; align-items: center; gap: 6px; color: #445; }
+  .line-solid { width: 22px; height: 0; border-top: 2px solid #8a97a0; }
+  .line-dash { width: 22px; height: 0; border-top: 2px dashed #9fb0ba; }
+  .line-light { width: 22px; height: 0; border-top: 2px solid #cfd8de; }
+
+  /* detail panel */
+  #panel { position: absolute; top: 0; right: 0; width: 340px; height: 100%; background: #fff; border-left: 1px solid var(--line); transform: translateX(100%); transition: transform .22s ease; overflow-y: auto; z-index: 6; box-shadow: -4px 0 18px rgba(0,0,0,.07); }
+  #panel.open { transform: translateX(0); }
+  #panel .pad { padding: 18px 20px 40px; }
+  #panel .close { position: absolute; top: 10px; right: 12px; border: none; background: none; font-size: 22px; color: var(--muted); cursor: pointer; line-height: 1; }
+  #panel h2 { font-size: 17px; margin: 4px 40px 6px 0; }
+  #panel .kind { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  #panel .pillar-tag { display: inline-block; color: #fff; font-size: 11.5px; padding: 3px 9px; border-radius: 20px; margin: 8px 0; }
+  #panel dl { margin: 12px 0 0; }
+  #panel dt { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-top: 12px; }
+  #panel dd { margin: 3px 0 0; font-size: 13.5px; line-height: 1.45; }
+  #panel .desc { margin-top: 14px; font-size: 13.5px; line-height: 1.5; color: #33414c; }
+  #panel a.node-link { display: block; padding: 6px 10px; margin: 4px 0; background: #f2f5f7; border-radius: 7px; font-size: 13px; color: var(--ink); text-decoration: none; cursor: pointer; border: 1px solid #e7ecef; }
+  #panel a.node-link:hover { background: #e7eef1; }
+  #panel .contact { font-size: 12.5px; color: var(--muted); }
+  .role-note { margin-top:10px; font-size:12px; color:#8a6d3b; background:#fdf6e6; border:1px solid #f0e0b8; padding:8px 10px; border-radius:7px; }
+  #panel a.ext-link { display:inline-block; margin-top:16px; background:var(--hub); color:#fff; padding:9px 15px; border-radius:8px; font-size:13px; text-decoration:none; }
+  #panel a.ext-link:hover { background:#0e5561; }
+  #panel dd a.in-link { color:var(--hub); text-decoration:none; border-bottom:1px solid #b9d3d8; }
+  #panel dd a.in-link:hover { border-bottom-color:var(--hub); }
+  #panel .svc-details { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
+  #panel .svc-details summary { cursor:pointer; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); user-select:none; }
+  #panel .svc-details .full-desc { font-size:13px; line-height:1.5; color:#33414c; margin-top:10px; }
+
+  /* AI chat */
+  #chat { position:absolute; right:16px; bottom:16px; width:370px; max-width:calc(100% - 32px); height:490px; max-height:calc(100% - 32px); background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 12px 38px rgba(0,0,0,.20); display:none; flex-direction:column; overflow:hidden; z-index:8; }
+  #chat.open { display:flex; }
+  #chat > header { background:#12333b; color:#fff; padding:11px 14px; display:flex; align-items:center; gap:8px; }
+  #chat h3 { font-size:14px; margin:0; font-weight:700; }
+  #chat .sub2 { font-size:11px; color:#a9c4cc; }
+  #chat .cclose { margin-left:auto; background:none; border:none; color:#cfe1e6; font-size:22px; cursor:pointer; line-height:1; }
+  #chatMsgs { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; background:#f7f9fb; }
+  .msg { max-width:90%; padding:9px 12px; border-radius:12px; font-size:13px; line-height:1.5; word-wrap:break-word; }
+  .msg.user { align-self:flex-end; background:var(--hub); color:#fff; border-bottom-right-radius:4px; }
+  .msg.ai { align-self:flex-start; background:#fff; border:1px solid var(--line); color:#1f2933; border-bottom-left-radius:4px; }
+  .msg.ai a { color:var(--hub); }
+  #chatForm { display:flex; gap:8px; padding:10px; border-top:1px solid var(--line); }
+  #chatInput { flex:1; border:1px solid #cfd8de; border-radius:8px; padding:8px 10px; font-size:13px; font-family:inherit; resize:none; max-height:90px; }
+  #chatSend { background:var(--hub); color:#fff; border:none; border-radius:8px; padding:0 15px; font-size:13px; cursor:pointer; }
+  #chatSend:hover { background:#0e5561; }
+  #toast { position:absolute; bottom:22px; left:50%; transform:translateX(-50%); background:#12333b; color:#fff; padding:9px 16px; border-radius:20px; font-size:12.5px; opacity:0; transition:opacity .25s; z-index:9; pointer-events:none; }
+  #toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div>
+      <h1>FactoryXChange 2.0 — Service Map</h1>
+      <div class="sub" id="subtitle"></div>
+    </div>
+    <button class="tool" id="reset">Reset view</button>
+    <div class="tools">
+      <input id="search" type="text" placeholder="Search a need, service, or partner…">
+      <label class="toggle"><input type="checkbox" id="toggleSecondary" checked> Secondary categories</label>
+      <button class="tool" id="askAi">Ask AI</button>
+      <button class="tool" id="copyCtx">Copy Pathway Info</button>
+    </div>
+  </header>
+  <div id="main">
+    <div id="graph"></div>
+    <div id="pillars"><div class="lg-title">Pillar (service colour) — untick to hide</div></div>
+    <div id="key">
+      <div class="k"><span class="swatch-hub"></span> Category hub</div>
+      <div class="k"><span class="swatch-partner"></span> Partner</div>
+      <div class="k"><span class="line-solid"></span> in category</div>
+      <div class="k"><span class="line-dash"></span> soft category</div>
+      <div class="k"><span class="line-light"></span> delivered by</div>
+    </div>
+    <div id="panel"><button class="close" id="panelClose">×</button><div class="pad" id="panelBody"></div></div>
+    <div id="chat">
+      <header><div><h3>FXC Service Finder</h3><div class="sub2">Click a Service, Category or FXC Partner to Discuss.</div></div><button class="cclose" id="chatClose">×</button></header>
+      <div id="chatMsgs"></div>
+      <form id="chatForm"><textarea id="chatInput" rows="1" placeholder="What does your client need?"></textarea><button id="chatSend" type="submit">Send</button></form>
+    </div>
+    <div id="toast"></div>
+    <a id="ghBtn" href="https://github.com/earlyprototype" target="_blank" rel="noopener" title="Built by earlyprototype — view on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 012-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+  </div>
+</div>
+
+<script>
+const CHAT_WORKER_URL = "https://fxc-service-chat.earlyprototype.workers.dev";  // set to your deployed Cloudflare Worker URL; empty = use local /api/chat
+let chatHistory = [];        // multi-turn transcript sent to the chat endpoint (seed greeting is UI-only, not in here)
+const HUB = "#16697a", PARTNER = "#4a5a6a";
+const PIN_PARTNER = "par-cspark";  // Creative Spark floats to the top of category service lists
+const FADE_NODE = "#e6ebee", FADE_FONT = "#c2cbd1";
+let data, network, nodes, edges;
+let byId = {};              // id -> raw record {kind,...}
+let baseNode = {};          // id -> {color, font} for restore
+let showSecondary = true;   // dashed second-category edges on by default
+let curEdgeSet = null;      // null = all edges eligible; else the current focused/filtered set
+let curNodeSet = null;      // null = no focus/search; else the set of in-view node ids (drives Copy view)
+let pillarOn = {};          // pillarId -> bool (legend checkboxes; unticked = hidden)
+let svcPillar = {};         // serviceId -> pillarId (for pillar-driven hide)
+
+init();
+
+async function init() {
+  data = await (await fetch("_data/entities.json")).json();
+  document.getElementById("subtitle").textContent = data.meta.subtitle || "";
+  buildPillarLegend();
+  const built = buildGraph();
+  nodes = new vis.DataSet(built.nodes);
+  edges = new vis.DataSet(built.edges);
+  network = new vis.Network(document.getElementById("graph"), {nodes, edges}, {
+    physics: { enabled: true, barnesHut: { gravitationalConstant: -20000, centralGravity: 0.30, springLength: 120, springConstant: 0.045, damping: 0.22, avoidOverlap: 0.35 }, stabilization: { iterations: 240 } },
+    layout: { randomSeed: 7, improvedLayout: true },
+    interaction: { hover: true, tooltipDelay: 120, navigationButtons: false, keyboard: false },
+    nodes: { borderWidth: 2, shadow: { enabled: true, size: 5, x: 0, y: 1, color: "rgba(0,0,0,.12)" } },
+    edges: { smooth: { type: "continuous" }, font: { size: 9, color: "#8a97a0", strokeWidth: 0, align: "middle" } }
+  });
+  // Springy-on-demand: physics runs during the initial layout and whenever you drag a
+  // node, then switches OFF once things settle — so it's bouncy to move but never drifts
+  // or rotates while idle (and clicks land cleanly on stationary nodes).
+  let calmTimer = null;
+  const calm = () => network.setOptions({ physics: false });
+  network.once("stabilizationIterationsDone", calm);
+  network.on("dragStart", () => { clearTimeout(calmTimer); network.setOptions({ physics: true }); });
+  network.on("dragEnd", () => { clearTimeout(calmTimer); calmTimer = setTimeout(calm, 1200); });
+  network.on("click", p => { if (p.nodes.length) selectNode(p.nodes[0]); else clearFocus(); });
+}
+
+function buildPillarLegend() {
+  const box = document.getElementById("pillars");
+  data.pillars.forEach(p => {
+    pillarOn[p.id] = true;
+    const el = document.createElement("label");
+    el.className = "chip";
+    el.innerHTML = `<input type="checkbox" checked data-pillar="${p.id}"><span class="dot" style="background:${p.color}"></span>${p.label}`;
+    el.querySelector("input").addEventListener("change", e => { pillarOn[p.id] = e.target.checked; applyPillarVisibility(); });
+    box.appendChild(el);
+  });
+}
+
+function buildGraph() {
+  const N = [], E = [];
+  const pillarColor = Object.fromEntries(data.pillars.map(p => [p.id, p.color]));
+
+  data.categories.forEach(c => {
+    byId[c.id] = { kind: "category", ...c };
+    N.push({ id: c.id, label: c.label, shape: "dot", size: 30, color: { background: HUB, border: "#0e4b58" }, font: { size: 16, color: "#000000", face: "system-ui", bold: "700" }, mass: 3 });
+  });
+  data.partners.forEach(p => {
+    byId[p.id] = { kind: "partner", ...p };
+    N.push({ id: p.id, label: p.label, shape: "box", color: { background: PARTNER, border: "#33414c" }, font: { size: 12, color: "#fff", face: "system-ui" }, margin: 6 });
+  });
+  data.services.forEach(s => {
+    byId[s.id] = { kind: "service", ...s };
+    svcPillar[s.id] = s.pillar;
+    const col = pillarColor[s.pillar] || "#7f8c8d";
+    N.push({ id: s.id, label: s.label, shape: "dot", size: 14, color: { background: col, border: shade(col) }, font: { size: 11, color: "#33414c", face: "system-ui" }, title: `${s.label}\n${s.desc}` });
+    E.push({ id: `e-cat-${s.id}`, from: s.id, to: s.category, color: { color: "#8a97a0", opacity: 0.7 }, width: 1.6 });
+    if (s.soft) E.push({ id: `e-soft-${s.id}`, from: s.id, to: s.soft, color: { color: "#b7c2c9", opacity: 0.6 }, width: 1, dashes: [4, 4] });
+    E.push({ id: `e-par-${s.id}`, from: s.id, to: s.partner, color: { color: "#cfd8de", opacity: 0.9 }, width: 1 });
+  });
+  data.roles.forEach((r, i) => {
+    E.push({ id: `e-role-${i}`, from: r.partner, to: r.target, label: r.rel, color: { color: "#c9b7d6", opacity: 0.8 }, width: 1, dashes: [2, 4], font: { size: 8, color: "#9b7fb0" } });
+  });
+
+  N.forEach(n => baseNode[n.id] = { color: n.color, font: n.font });
+  return { nodes: N, edges: E };
+}
+
+/* ---------- focus / highlight ---------- */
+// Which service owns an edge (for pillar-driven hide); null for consortium-role edges.
+function edgeServiceOff(eid) {
+  let sid = null;
+  if (eid.startsWith("e-cat-")) sid = eid.slice(6);
+  else if (eid.startsWith("e-par-")) sid = eid.slice(6);
+  else if (eid.startsWith("e-soft-")) sid = eid.slice(7);
+  return sid && svcPillar[sid] ? !pillarOn[svcPillar[sid]] : false;
+}
+// Single place that decides edge visibility: honours the focus/filter set, the pillar
+// checkboxes, AND the "Secondary categories" toggle (dashed e-soft-* edges).
+function applyEdges() {
+  edges.update(edges.getIds().map(eid => ({
+    id: eid,
+    hidden: edgeServiceOff(eid) || (curEdgeSet && !curEdgeSet.has(eid)) || (eid.startsWith("e-soft-") && !showSecondary)
+  })));
+}
+// Hide/show whole service nodes by their pillar checkbox, then reconcile edges.
+function applyPillarVisibility() {
+  nodes.update(data.services.map(s => ({ id: s.id, hidden: !pillarOn[s.pillar] })));
+  applyEdges();
+}
+function selectNode(id) {
+  const neighbours = new Set(network.getConnectedNodes(id));
+  neighbours.add(id);
+  const keepEdges = new Set(network.getConnectedEdges(id));
+  nodes.update(nodes.getIds().map(nid => neighbours.has(nid)
+    ? { id: nid, color: baseNode[nid].color, font: baseNode[nid].font }
+    : { id: nid, color: { background: FADE_NODE, border: FADE_NODE }, font: { color: FADE_FONT } }));
+  curNodeSet = neighbours; curEdgeSet = keepEdges; applyEdges();
+  network.selectNodes([id]);
+  showPanel(id);
+}
+function clearFocus() {
+  nodes.update(nodes.getIds().map(nid => ({ id: nid, color: baseNode[nid].color, font: baseNode[nid].font })));
+  curNodeSet = null; curEdgeSet = null; applyEdges();
+  closePanel();
+}
+
+/* ---------- search ---------- */
+document.getElementById("search").addEventListener("input", e => {
+  const q = e.target.value.trim().toLowerCase();
+  if (!q) { clearFocus(); return; }
+  const hits = new Set();
+  Object.values(byId).forEach(r => {
+    const hay = `${r.label} ${r.desc || ""} ${r.route || ""} ${r.portfolio || ""}`.toLowerCase();
+    if (hay.includes(q)) hits.add(r.id);
+  });
+  // include direct neighbours of hits so matches aren't floating
+  const keepN = new Set(hits), keepE = new Set();
+  hits.forEach(id => { network.getConnectedNodes(id).forEach(n => keepN.add(n)); network.getConnectedEdges(id).forEach(x => keepE.add(x)); });
+  nodes.update(nodes.getIds().map(nid => keepN.has(nid)
+    ? { id: nid, color: baseNode[nid].color, font: baseNode[nid].font }
+    : { id: nid, color: { background: FADE_NODE, border: FADE_NODE }, font: { color: FADE_FONT } }));
+  curNodeSet = keepN; curEdgeSet = keepE; applyEdges();
+});
+
+/* ---------- detail panel ---------- */
+function showPanel(id) {
+  const r = byId[id];
+  let html = "";
+  if (r.kind === "service") {
+    const pil = data.pillars.find(p => p.id === r.pillar);
+    const cat = byId[r.category], soft = r.soft ? byId[r.soft] : null, par = byId[r.partner];
+    html = `<div class="kind">Service</div><h2>${esc(r.label)}</h2>
+      <span class="pillar-tag" style="background:${pil.color}">${pil.label}</span>
+      <p class="desc">${esc(r.desc)}</p>
+      <dl>
+        <dt>Category</dt><dd>${esc(cat.label)}${soft ? ` · <span style="color:var(--muted)">secondary: ${esc(soft.label)}</span>` : ""}</dd>
+        <dt>Delivered by</dt><dd>${link(par.id, par.label)}<div class="contact">${esc(par.contact)}</div></dd>
+      </dl>
+      <details class="svc-details">
+        <summary>Full details</summary>
+        <dl>
+          <dt>Duration</dt><dd>${esc(r.duration || "—")}</dd>
+          <dt>Service lead</dt><dd>${esc(r.service_lead || "—")}</dd>
+        </dl>
+        <div class="full-desc">${esc(r.full || "").replace(/\n+/g, "<br><br>")}</div>
+      </details>
+      ${r.url ? `<a class="ext-link" href="${esc(r.url)}" target="_blank" rel="noopener">View on FactoryXChange ↗</a>` : ""}`;
+  } else if (r.kind === "partner") {
+    const svcs = data.services.filter(s => s.partner === r.id);
+    html = `<div class="kind">Partner</div><h2>${esc(r.label)}</h2>
+      <p class="desc">${esc(r.full)}</p>
+      <dl>
+      ${r.website ? `<dt>Website</dt><dd><a class="in-link" href="${esc(r.website)}" target="_blank" rel="noopener">${esc(r.website.replace(/^https?:\/\/(www\.)?/, ""))} ↗</a></dd>` : ""}
+      <dt>Portfolio</dt><dd>${esc(r.portfolio)}</dd>
+      <dt>Route a client here when…</dt><dd>${esc(r.route)}</dd>
+      <dt>Resourcing contact</dt><dd class="contact">${esc(r.contact)}</dd></dl>`;
+    if (!r.sells) html += `<div class="role-note">Consortium role — no client-bookable service.</div>`;
+    if (svcs.length) { html += `<dt style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-top:16px">Services (${svcs.length})</dt>`; svcs.forEach(s => html += link(s.id, s.label)); }
+  } else {
+    const svcs = data.services.filter(s => s.category === r.id)
+      .sort((a, b) => (b.partner === PIN_PARTNER) - (a.partner === PIN_PARTNER));
+    const soft = data.services.filter(s => s.soft === r.id);
+    html = `<div class="kind">Category</div><h2>${esc(r.label)}</h2>
+      <p class="desc">${svcs.length} services primarily here${soft.length ? `, plus ${soft.length} with this as a soft category` : ""}.</p>`;
+    svcs.forEach(s => html += link(s.id, `${s.label} · ${byId[s.partner].label}`));
+  }
+  document.getElementById("panelBody").innerHTML = html;
+  document.getElementById("panel").classList.add("open");
+  document.querySelectorAll("#panel a.node-link").forEach(a => a.onclick = () => selectNode(a.dataset.id));
+}
+function link(id, label) { return `<a class="node-link" data-id="${id}">${esc(label)}</a>`; }
+function closePanel() { document.getElementById("panel").classList.remove("open"); }
+document.getElementById("panelClose").onclick = () => { closePanel(); network.unselectAll(); };
+document.getElementById("reset").onclick = () => { document.getElementById("search").value = ""; clearFocus(); network.fit({ animation: true }); };
+document.getElementById("toggleSecondary").addEventListener("change", e => { showSecondary = e.target.checked; applyEdges(); });
+
+/* ---------- copy AI context (static-safe: works with no server) ---------- */
+// Services currently in view = pillar checkbox on, and inside the current focus/search set (if any).
+function activeServices() {
+  return data.services.filter(s => pillarOn[s.pillar] && (curNodeSet === null || curNodeSet.has(s.id)));
+}
+function buildContextText(svcs) {
+  const cat = Object.fromEntries(data.categories.map(c => [c.id, c.label]));
+  const pil = Object.fromEntries(data.pillars.map(p => [p.id, p.label]));
+  const par = Object.fromEntries(data.partners.map(p => [p.id, p]));
+  const whole = svcs.length === data.services.length;
+  let t = `FactoryXChange 2.0 — ${whole ? "all " : ""}${svcs.length} service${svcs.length === 1 ? "" : "s"}`
+        + `${whole ? "" : " (current view)"}. Each: service, partner, category, pillar, link.\n\n`;
+  svcs.forEach(s => {
+    const p = par[s.partner];
+    t += `• ${s.label} — ${p.label} (${p.contact})\n`
+       + `  category: ${cat[s.category]}${s.soft ? " / " + cat[s.soft] : ""} · pillar: ${pil[s.pillar]}\n`
+       + `  ${s.desc}\n  ${s.url}\n\n`;
+  });
+  return t;
+}
+function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2200); }
+document.getElementById("copyCtx").onclick = () => {
+  const svcs = activeServices();
+  if (!svcs.length) { toast("Nothing in view to copy — adjust filters or click a node"); return; }
+  navigator.clipboard.writeText(buildContextText(svcs))
+    .then(() => toast(`Copied ${svcs.length} service${svcs.length === 1 ? "" : "s"} to clipboard`))
+    .catch(() => toast("Copy failed — check clipboard permissions"));
+};
+
+/* ---------- Ask AI (grounded chat: Cloudflare Worker in prod, local /api/chat in dev) ---------- */
+const chatEl = document.getElementById("chat");
+document.getElementById("askAi").onclick = () => {
+  chatEl.classList.add("open");
+  if (!chatEl.dataset.seeded) { addMsg("ai", "Hi — tell me what a client needs and I'll point to FXC services that fit. Try: “reduce waste on my production line”, “NIS2 compliance”, or “funding to buy a machine”."); chatEl.dataset.seeded = "1"; }
+  document.getElementById("chatInput").focus();
+};
+document.getElementById("chatClose").onclick = () => chatEl.classList.remove("open");
+function addMsg(role, text) {
+  const d = document.createElement("div"); d.className = "msg " + role;
+  d.innerHTML = role === "ai" ? renderAnswer(text) : esc(text);
+  const box = document.getElementById("chatMsgs"); box.appendChild(d); box.scrollTop = box.scrollHeight; return d;
+}
+function renderAnswer(t) {
+  let h = esc(t);
+  // markdown links [text](url), then any bare urls not already linked
+  h = h.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  h = h.replace(/(^|[^"'>])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+  // markdown the model actually uses: #headers -> bold line, **bold**, * / - bullets, *italic*
+  h = h.replace(/^\s*#{1,6}\s*(.+)$/gm, '<strong>$1</strong>');
+  h = h.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
+  h = h.replace(/^\s*[*-]\s+/gm, '• ');
+  h = h.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');
+  return h.replace(/\n/g, "<br>");
+}
+document.getElementById("chatForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const inp = document.getElementById("chatInput"); const q = inp.value.trim(); if (!q) return;
+  addMsg("user", q); inp.value = "";
+  chatHistory.push({ role: "user", text: q });
+  const thinking = addMsg("ai", "…");
+  try {
+    const endpoint = CHAT_WORKER_URL || "/api/chat";
+    const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: chatHistory.slice(-8), focus: activeServices().map(s => s.id) }) });
+    const j = await r.json();
+    if (j.reply) {
+      chatHistory.push({ role: "assistant", text: j.reply });
+      thinking.innerHTML = renderAnswer(j.reply);
+    } else {
+      // Worker returned an error (not a reply) — surface it and roll back this
+      // failed turn so it doesn't linger in history and re-break the next send.
+      chatHistory.pop();
+      thinking.textContent = j.error ? `Couldn't send that — ${j.error}` : "No response — please try again.";
+    }
+  } catch (err) {
+    thinking.textContent = "Chat unavailable — start the chat server:  python chat_server.py";
+  }
+  document.getElementById("chatMsgs").scrollTop = 1e9;
+});
+document.getElementById("chatInput").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.getElementById("chatForm").requestSubmit(); }
+});
+
+/* ---------- utils ---------- */
+function esc(s) { return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function shade(hex) { const n = parseInt(hex.slice(1), 16); const r = Math.max(0, (n >> 16) - 30), g = Math.max(0, ((n >> 8) & 255) - 30), b = Math.max(0, (n & 255) - 30); return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`; }
+</script>
+</body>
+</html>
