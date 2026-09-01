@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 860" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+  <rect x="0" y="0" width="1160" height="860" fill="#ffffff"/>
+
+  <!-- title -->
+  <text x="40" y="46" font-size="25" font-weight="700" fill="#12333b">FactoryXChange 2.0 Service Map — built</text>
+  <text x="40" y="74" font-size="13.5" fill="#667">17 partners · 73 services · 63 carry a soft second category · 212 connections · 14 partners sell, 3 consortium-role only</text>
+  <text x="40" y="96" font-size="12.5" fill="#9aa5ad">Overview of the real data. The live map is a draggable force-directed graph — open it to explore.</text>
+
+  <!-- category hubs, sized by primary service count -->
+  <text x="40" y="140" font-size="13" font-weight="700" fill="#333" letter-spacing="0.03em">CATEGORY HUBS — bubble size = services primarily here</text>
+  <g text-anchor="middle">
+    <!-- Technology 22 -->
+    <circle cx="150" cy="220" r="40" fill="#16697a" stroke="#0e4b58" stroke-width="2"/>
+    <text x="150" y="227" font-size="20" font-weight="700" fill="#fff">22</text>
+    <text x="150" y="282" font-size="13.5" fill="#1f2933" font-weight="600">Technology</text>
+    <text x="150" y="299" font-size="11" fill="#8a97a0">+13 soft</text>
+    <!-- Business 19 -->
+    <circle cx="320" cy="220" r="38" fill="#16697a" stroke="#0e4b58" stroke-width="2"/>
+    <text x="320" y="227" font-size="19" font-weight="700" fill="#fff">19</text>
+    <text x="320" y="280" font-size="13.5" fill="#1f2933" font-weight="600">Business</text>
+    <text x="320" y="297" font-size="11" fill="#8a97a0">+20 soft</text>
+    <!-- Skills 12 -->
+    <circle cx="490" cy="220" r="33" fill="#16697a" stroke="#0e4b58" stroke-width="2"/>
+    <text x="490" y="226" font-size="17" font-weight="700" fill="#fff">12</text>
+    <text x="490" y="274" font-size="13.5" fill="#1f2933" font-weight="600">Skills</text>
+    <text x="490" y="291" font-size="11" fill="#8a97a0">+12 soft</text>
+    <!-- AI 11 -->
+    <circle cx="660" cy="220" r="32" fill="#16697a" stroke="#0e4b58" stroke-width="2"/>
+    <text x="660" y="226" font-size="17" font-weight="700" fill="#fff">11</text>
+    <text x="660" y="273" font-size="13.5" fill="#1f2933" font-weight="600">AI</text>
+    <text x="660" y="290" font-size="11" fill="#8a97a0">+8 soft</text>
+    <!-- Data 8 -->
+    <circle cx="830" cy="220" r="29" fill="#16697a" stroke="#0e4b58" stroke-width="2"/>
+    <text x="830" y="226" font-size="16" font-weight="700" fill="#fff">8</text>
+    <text x="830" y="270" font-size="13.5" fill="#1f2933" font-weight="600">Data</text>
+    <text x="830" y="287" font-size="11" fill="#8a97a0">+7 soft</text>
+    <!-- Ecosystem 1 -->
+    <circle cx="1000" cy="220" r="18" fill="#16697a" stroke="#0e4b58" stroke-width="2"/>
+    <text x="1000" y="225" font-size="13" font-weight="700" fill="#fff">1</text>
+    <text x="1000" y="259" font-size="13.5" fill="#1f2933" font-weight="600">Ecosystem</text>
+    <text x="1000" y="276" font-size="11" fill="#8a97a0">+3 soft</text>
+  </g>
+
+  <line x1="40" y1="330" x2="1120" y2="330" stroke="#e6ebee" stroke-width="1.5"/>
+
+  <!-- pillars (left) -->
+  <text x="40" y="374" font-size="13" font-weight="700" fill="#333" letter-spacing="0.03em">PILLAR — the colour every service takes</text>
+  <g font-size="13">
+    <!-- TBI 41 -->
+    <circle cx="58" cy="415" r="8" fill="#3498db"/><text x="76" y="419" fill="#333">Test Before Invest</text>
+    <rect x="300" y="405" width="246" height="18" rx="3" fill="#3498db"/><text x="556" y="419" fill="#556">41</text>
+    <!-- Skills 15 -->
+    <circle cx="58" cy="459" r="8" fill="#2ecc71"/><text x="76" y="463" fill="#333">Skills &amp; Training</text>
+    <rect x="300" y="449" width="90" height="18" rx="3" fill="#2ecc71"/><text x="400" y="463" fill="#556">15</text>
+    <!-- DataAI 11 -->
+    <circle cx="58" cy="503" r="8" fill="#e74c3c"/><text x="76" y="507" fill="#333">Data &amp; AI Value Chain</text>
+    <rect x="300" y="493" width="66" height="18" rx="3" fill="#e74c3c"/><text x="376" y="507" fill="#556">11</text>
+    <!-- Invest 5 -->
+    <circle cx="58" cy="547" r="8" fill="#f39c12"/><text x="76" y="551" fill="#333">Support to Find Investment</text>
+    <rect x="300" y="537" width="30" height="18" rx="3" fill="#f39c12"/><text x="340" y="551" fill="#556">5</text>
+    <!-- Network 1 -->
+    <circle cx="58" cy="591" r="8" fill="#9b59b6"/><text x="76" y="595" fill="#333">Partnerships &amp; Networking</text>
+    <rect x="300" y="581" width="8" height="18" rx="3" fill="#9b59b6"/><text x="318" y="595" fill="#556">1</text>
+  </g>
+  <text x="40" y="648" font-size="12" fill="#8a97a0">Test-Before-Invest dominates — expected for an EDIH hub built around de-risking before spend.</text>
+
+  <!-- partners (right) -->
+  <text x="600" y="374" font-size="13" font-weight="700" fill="#333" letter-spacing="0.03em">SERVICES PER PARTNER</text>
+  <g font-size="12.5">
+    <g><text x="600" y="405" fill="#333">IMR</text><rect x="770" y="395" width="169" height="13" rx="2" fill="#4a5a6a"/><text x="947" y="405" fill="#667">13</text></g>
+    <g><text x="600" y="428" fill="#333">Creative Spark</text><rect x="770" y="418" width="104" height="13" rx="2" fill="#4a5a6a"/><text x="882" y="428" fill="#667">8</text></g>
+    <g><text x="600" y="451" fill="#333">Futurecast</text><rect x="770" y="441" width="91" height="13" rx="2" fill="#4a5a6a"/><text x="869" y="451" fill="#667">7</text></g>
+    <g><text x="600" y="474" fill="#333">TisaLabs</text><rect x="770" y="464" width="78" height="13" rx="2" fill="#4a5a6a"/><text x="856" y="474" fill="#667">6</text></g>
+    <g><text x="600" y="497" fill="#333">KPMG Future Analytics</text><rect x="770" y="487" width="78" height="13" rx="2" fill="#4a5a6a"/><text x="856" y="497" fill="#667">6</text></g>
+    <g><text x="600" y="520" fill="#333">Gemmo AI</text><rect x="770" y="510" width="65" height="13" rx="2" fill="#4a5a6a"/><text x="843" y="520" fill="#667">5</text></g>
+    <g><text x="600" y="543" fill="#333">Mavarick AI</text><rect x="770" y="533" width="65" height="13" rx="2" fill="#4a5a6a"/><text x="843" y="543" fill="#667">5</text></g>
+    <g><text x="600" y="566" fill="#333">TUS</text><rect x="770" y="556" width="65" height="13" rx="2" fill="#4a5a6a"/><text x="843" y="566" fill="#667">5</text></g>
+    <g><text x="600" y="589" fill="#333">Impetus</text><rect x="770" y="579" width="52" height="13" rx="2" fill="#4a5a6a"/><text x="830" y="589" fill="#667">4</text></g>
+    <g><text x="600" y="612" fill="#333">Saluto Partners</text><rect x="770" y="602" width="52" height="13" rx="2" fill="#4a5a6a"/><text x="830" y="612" fill="#667">4</text></g>
+    <g><text x="600" y="635" fill="#333">MicroInspect</text><rect x="770" y="625" width="39" height="13" rx="2" fill="#4a5a6a"/><text x="817" y="635" fill="#667">3</text></g>
+    <g><text x="600" y="658" fill="#333">Frontend</text><rect x="770" y="648" width="39" height="13" rx="2" fill="#4a5a6a"/><text x="817" y="658" fill="#667">3</text></g>
+    <g><text x="600" y="681" fill="#333">Inventya</text><rect x="770" y="671" width="26" height="13" rx="2" fill="#4a5a6a"/><text x="804" y="681" fill="#667">2</text></g>
+    <g><text x="600" y="704" fill="#333">Cyberlynk</text><rect x="770" y="694" width="26" height="13" rx="2" fill="#4a5a6a"/><text x="804" y="704" fill="#667">2</text></g>
+  </g>
+  <text x="600" y="740" font-size="12" fill="#8a97a0">ICHEC (co-delivers the Blueprint), Monaru &amp; Piquant hold consortium roles — no bookable service.</text>
+
+  <!-- footer legend of edges -->
+  <line x1="40" y1="782" x2="1120" y2="782" stroke="#e6ebee" stroke-width="1.5"/>
+  <g font-size="12.5" fill="#445">
+    <text x="40" y="812" font-weight="700" fill="#333">Edges:</text>
+    <line x1="110" y1="808" x2="150" y2="808" stroke="#8a97a0" stroke-width="2"/><text x="158" y="812">in category</text>
+    <line x1="270" y1="808" x2="310" y2="808" stroke="#9fb0ba" stroke-width="2" stroke-dasharray="4 4"/><text x="318" y="812">soft category</text>
+    <line x1="450" y1="808" x2="490" y2="808" stroke="#cfd8de" stroke-width="2"/><text x="498" y="812">delivered by (light)</text>
+  </g>
+</svg>
