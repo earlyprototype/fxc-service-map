@@ -1,38 +1,38 @@
 #!/usr/bin/env python3
 """
-FXC Service Map dev server — with an optional, grounded AI "Service Finder" chat.
+FXC Service Map dev server with an optional AI Service Finder.
 
-Serves the repository root (the map) AND answers POST /api/chat by asking an LLM to match a
-client's need to a real FXC service. The model is given the FULL service catalogue
-(from _data/entities.json) and instructed to recommend only real services and
-cite the partner + live FXC page — so it signposts, it doesn't hallucinate.
+Serves index.html and _data/entities.json on loopback. POST /api/chat asks a
+provider to match a client's need to a service in the catalogue.
 
-Why full-catalogue-in-prompt and not a vector DB: 73 services is tiny. Stuffing the
-whole catalogue into the system prompt is simpler, cheaper, and more accurate than
-retrieval at this scale. Right tool for the size.
+The optional provider configuration lives in ~/.config/fxc-service-map/chat_config.json.
+The map works without it.
 
-Security: the API key lives in chat_config.json (gitignored) and is used server-side
-only — it never reaches the browser. No key / no config → the chat returns a friendly
-"not configured" note and the rest of the map works untouched.
-
-Run:  python chat_server.py      then open  http://localhost:8020/index.html
-Stdlib only — no Flask, no SDKs (calls provider REST APIs via urllib).
+Run python chat_server.py and open http://127.0.0.1:8020/.
 """
 
 import json
+import os
+import stat
 import urllib.request
-import urllib.error
+from contextlib import ExitStack
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-ROOT = Path(__file__).parent
-SITE = ROOT
-CONFIG = ROOT / "chat_config.json"
+SITE = Path(__file__).resolve().parent
+HOST = "127.0.0.1"
 PORT = 8020
 
 
+def read_catalogue():
+    with open_regular_file(SITE / "_data" / "entities.json", public_asset=True) as stream:
+        return json.load(stream)
+
+
 def build_catalogue():
-    data = json.loads((SITE / "_data" / "entities.json").read_text(encoding="utf-8"))
+    data = read_catalogue()
     cat = {c["id"]: c["label"] for c in data["categories"]}
     pil = {p["id"]: p["label"] for p in data["pillars"]}
     par = {p["id"]: p for p in data["partners"]}
@@ -57,7 +57,7 @@ SYSTEM_PROMPT = (
     "- Prefer 1-3 strong matches over a long list. Say briefly why each fits.\n"
     "- If nothing fits well, say so plainly and point to the closest category or partner.\n"
     "- Be concise and practical. You are signposting, not selling.\n\n"
-    "CATALOGUE (73 live services):\n" + build_catalogue()
+    "CATALOGUE (73 live services):\n"
 )
 
 
@@ -70,7 +70,7 @@ def build_focus_block(focus_ids):
     """
     if not focus_ids:
         return ""
-    data = json.loads((SITE / "_data" / "entities.json").read_text(encoding="utf-8"))
+    data = read_catalogue()
     par = {p["id"]: p for p in data["partners"]}
     wanted = set(focus_ids)
     focus = [s for s in data["services"] if s["id"] in wanted]
@@ -99,12 +99,15 @@ def _gemini_contents(messages):
 def call_gemini(cfg, system_prompt, messages):
     model = cfg.get("model", "gemini-3.5-flash")
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-           f"{model}:generateContent?key={cfg['api_key']}")
+           f"{model}:generateContent")
     body = {
         "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": _gemini_contents(messages),
     }
-    out = _post_json(url, body, {"Content-Type": "application/json"})
+    out = _post_json(url, body, {
+        "Content-Type": "application/json",
+        "x-goog-api-key": cfg["api_key"],
+    })
     return out["candidates"][0]["content"]["parts"][0]["text"]
 
 
@@ -128,8 +131,9 @@ PROVIDERS = {"gemini": call_gemini, "anthropic": call_anthropic}
 
 
 def _post_json(url, body, headers):
-    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"),
-                                 headers=headers, method="POST")
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST")
+    for name, value in headers.items():
+        req.add_unredirected_header(name, value)
     with urllib.request.urlopen(req, timeout=45) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -145,31 +149,136 @@ def _last_user_text(messages):
     return ""
 
 
+def _open_posix(path, flags):
+    # Open each component relative to its pinned parent, including the site directory.
+    directory_flags = getattr(os, "O_PATH", getattr(os, "O_SEARCH", os.O_RDONLY))
+    directory_flags |= os.O_DIRECTORY | os.O_NOFOLLOW
+    with ExitStack() as directories:
+        parent = None
+        path = Path(path)
+        for part in path.parts[:-1]:
+            parent = os.open(part, directory_flags, dir_fd=parent)
+            directories.callback(os.close, parent)
+        return os.open(path.name, flags | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+
+
+def _windows_handle_matches(stream, path):
+    import ctypes
+    import msvcrt
+    from ctypes.wintypes import HANDLE
+
+    # Ask Windows where this handle landed, including any junctions it traversed.
+    handle = HANDLE(msvcrt.get_osfhandle(stream.fileno()))
+    name = ctypes.create_unicode_buffer(32768)
+    length = ctypes.windll.kernel32.GetFinalPathNameByHandleW(handle, name, len(name), 0)
+    if not 0 < length < len(name):
+        return False
+    expected = str(path)
+    if not expected.startswith("\\\\?\\"):
+        if expected.startswith("\\\\"):
+            expected = "UNC\\" + expected[2:]
+        expected = "\\\\?\\" + expected
+    return name.value == expected
+
+
+def open_regular_file(path, *, public_asset=False):
+    """Open an absolute canonical path and verify the file before reading any bytes."""
+    opener = None if os.name == "nt" else _open_posix
+    with ExitStack() as cleanup:
+        stream = cleanup.enter_context(open(path, "rb", opener=opener))
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError("Expected a regular file")
+        if public_asset and info.st_nlink != 1:
+            raise OSError("Expected a single link to the public asset")
+        if os.name == "nt" and not _windows_handle_matches(stream, path):
+            raise OSError("Unexpected file location")
+        cleanup.pop_all()
+        return stream
+
+
+try:
+    CATALOGUE = build_catalogue()
+except OSError:
+    CATALOGUE = None
+
+
+def load_config():
+    try:
+        path = (Path.home() / ".config" / "fxc-service-map" / "chat_config.json").resolve(strict=True)
+        if SITE in path.parents:
+            return None
+        with open_regular_file(path) as stream:
+            cfg = json.load(stream)
+        return cfg if isinstance(cfg, dict) else None
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
 def answer_question(messages, focus_ids):
     question = _last_user_text(messages)
     if not question:
         return ("Ask me what a client needs — e.g. \"help with NIS2 compliance\", "
                 "\"we want to trial AI vision inspection\", or \"funding to buy a machine\".")
-    if not CONFIG.exists():
-        return ("⚙️ AI chat isn't configured yet. Copy chat_config.template.json to "
-                "chat_config.json, add your API key, and restart the server. (The rest of the map "
-                "works without it.)")
+    cfg = load_config()
+    if cfg is None:
+        return ("⚙️ AI chat isn't configured yet. See the local chat setup in README.md. "
+                "The map works without it.")
     try:
-        cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
         fn = PROVIDERS.get(cfg.get("provider", "gemini"))
         if not fn or not cfg.get("api_key") or "PASTE" in cfg.get("api_key", ""):
             return "⚙️ chat_config.json needs a valid \"provider\" (gemini or anthropic) and \"api_key\"."
-        system_prompt = SYSTEM_PROMPT + "\n\n" + build_focus_block(focus_ids)
+        try:
+            catalogue = CATALOGUE if CATALOGUE is not None else build_catalogue()
+            system_prompt = SYSTEM_PROMPT + catalogue + "\n\n" + build_focus_block(focus_ids)
+        except OSError:
+            return "The service catalogue is unavailable."
         return fn(cfg, system_prompt, messages)
-    except urllib.error.HTTPError as e:
-        return f"The AI provider returned an error ({e.code}). Check the key and model in chat_config.json."
-    except Exception as e:
-        return f"Chat error: {e}"
+    except Exception:
+        return "The AI provider could not complete the request. Check the key and model in chat_config.json."
 
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(SITE), **kwargs)
+
+    def send_head(self):
+        path = self.path.partition("?")[0]
+        if path == "/":
+            path = "/index.html"
+        if path not in ("/index.html", "/_data/entities.json"):
+            self.send_error(404)
+            return None
+        with ExitStack() as cleanup:
+            try:
+                stream = cleanup.enter_context(open_regular_file(SITE / path[1:], public_asset=True))
+            except OSError:
+                self.send_error(404)
+                return None
+            info = os.fstat(stream.fileno())
+            if self.is_not_modified(info.st_mtime):
+                self.send_response(304)
+                self.end_headers()
+                return None
+            self.send_response(200)
+            self.send_header("Content-Type", self.guess_type(path))
+            self.send_header("Content-Length", str(info.st_size))
+            self.send_header("Last-Modified", self.date_time_string(info.st_mtime))
+            self.end_headers()
+            cleanup.pop_all()  # The inherited GET and HEAD handlers close this stream.
+            return stream
+
+    def is_not_modified(self, mtime):
+        since = self.headers.get("If-Modified-Since")
+        if not since or "If-None-Match" in self.headers:
+            return False
+        try:
+            date = parsedate_to_datetime(since)
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=timezone.utc)
+            return date.tzinfo is timezone.utc and int(mtime) <= date.timestamp()
+        except (TypeError, ValueError, IndexError, OverflowError, OSError):
+            return False
 
     def do_POST(self):
         if self.path != "/api/chat":
@@ -195,7 +304,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    ready = CONFIG.exists()
-    print(f"FXC Service Map on http://localhost:{PORT}/index.html")
-    print(f"AI chat: {'configured' if ready else 'NOT configured (map works; see chat_config.template.json)'}")
-    ThreadingHTTPServer(("", PORT), Handler).serve_forever()
+    ready = load_config() is not None
+    print(f"FXC Service Map on http://{HOST}:{PORT}/index.html")
+    print(f"AI chat: {'configured' if ready else 'not configured (see README.md)'}")
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

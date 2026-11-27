@@ -1,5 +1,5 @@
 {
-  "_README": "Copy this file to chat_config.json (which is gitignored) and paste your key. Gemini has a free tier at https://aistudio.google.com/apikey. For Anthropic use provider 'anthropic', a key from console.anthropic.com, and model e.g. 'claude-sonnet-5'. Restart chat_server.py after editing.",
+  "_README": "Create ~/.config/fxc-service-map and copy this file there as chat_config.json. Enter your Gemini key from https://aistudio.google.com/apikey. For Anthropic use provider 'anthropic', a key from console.anthropic.com, and a model such as 'claude-sonnet-5'.",
   "provider": "gemini",
   "api_key": "PASTE_YOUR_KEY_HERE",
   "model": "gemini-3.5-flash"
