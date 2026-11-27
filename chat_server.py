@@ -12,13 +12,16 @@ Run python chat_server.py and open http://127.0.0.1:8020/.
 """
 
 import json
+import os
+import stat
 import urllib.request
-import urllib.error
+from contextlib import ExitStack
+from datetime import timezone
+from email.utils import parsedate_to_datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 SITE = Path(__file__).resolve().parent
-CONFIG = Path.home() / ".config" / "fxc-service-map" / "chat_config.json"
 HOST = "127.0.0.1"
 PORT = 8020
 
@@ -91,12 +94,15 @@ def _gemini_contents(messages):
 def call_gemini(cfg, system_prompt, messages):
     model = cfg.get("model", "gemini-3.5-flash")
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-           f"{model}:generateContent?key={cfg['api_key']}")
+           f"{model}:generateContent")
     body = {
         "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": _gemini_contents(messages),
     }
-    out = _post_json(url, body, {"Content-Type": "application/json"})
+    out = _post_json(url, body, {
+        "Content-Type": "application/json",
+        "x-goog-api-key": cfg["api_key"],
+    })
     return out["candidates"][0]["content"]["parts"][0]["text"]
 
 
@@ -137,8 +143,61 @@ def _last_user_text(messages):
     return ""
 
 
-def config_available():
-    return CONFIG.is_file() and SITE not in CONFIG.resolve().parents
+def _open_posix(path, flags):
+    # Open each component relative to its pinned parent, including the site directory.
+    directory_flags = getattr(os, "O_PATH", getattr(os, "O_SEARCH", os.O_RDONLY))
+    directory_flags |= os.O_DIRECTORY | os.O_NOFOLLOW
+    with ExitStack() as directories:
+        parent = None
+        path = Path(path)
+        for part in path.parts[:-1]:
+            parent = os.open(part, directory_flags, dir_fd=parent)
+            directories.callback(os.close, parent)
+        return os.open(path.name, flags | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+
+
+def _windows_handle_matches(stream, path):
+    import ctypes
+    import msvcrt
+    from ctypes.wintypes import HANDLE
+
+    # Ask Windows where this handle landed, including any junctions it traversed.
+    handle = HANDLE(msvcrt.get_osfhandle(stream.fileno()))
+    name = ctypes.create_unicode_buffer(32768)
+    length = ctypes.windll.kernel32.GetFinalPathNameByHandleW(handle, name, len(name), 0)
+    if not 0 < length < len(name):
+        return False
+    expected = str(path)
+    if not expected.startswith("\\\\?\\"):
+        if expected.startswith("\\\\"):
+            expected = "UNC\\" + expected[2:]
+        expected = "\\\\?\\" + expected
+    return name.value == expected
+
+
+def open_regular_file(path):
+    """Open an absolute canonical path and verify the file before reading any bytes."""
+    opener = None if os.name == "nt" else _open_posix
+    with ExitStack() as cleanup:
+        stream = cleanup.enter_context(open(path, "rb", opener=opener))
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise OSError("Expected a regular file")
+        if os.name == "nt" and not _windows_handle_matches(stream, path):
+            raise OSError("Unexpected file location")
+        cleanup.pop_all()
+        return stream
+
+
+def load_config():
+    try:
+        path = (Path.home() / ".config" / "fxc-service-map" / "chat_config.json").resolve(strict=True)
+        if SITE in path.parents:
+            return None
+        with open_regular_file(path) as stream:
+            cfg = json.load(stream)
+        return cfg if isinstance(cfg, dict) else None
+    except (OSError, RuntimeError, ValueError):
+        return None
 
 
 def answer_question(messages, focus_ids):
@@ -146,20 +205,18 @@ def answer_question(messages, focus_ids):
     if not question:
         return ("Ask me what a client needs — e.g. \"help with NIS2 compliance\", "
                 "\"we want to trial AI vision inspection\", or \"funding to buy a machine\".")
-    if not config_available():
+    cfg = load_config()
+    if cfg is None:
         return ("⚙️ AI chat isn't configured yet. See the local chat setup in README.md. "
                 "The map works without it.")
     try:
-        cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
         fn = PROVIDERS.get(cfg.get("provider", "gemini"))
         if not fn or not cfg.get("api_key") or "PASTE" in cfg.get("api_key", ""):
             return "⚙️ chat_config.json needs a valid \"provider\" (gemini or anthropic) and \"api_key\"."
         system_prompt = SYSTEM_PROMPT + "\n\n" + build_focus_block(focus_ids)
         return fn(cfg, system_prompt, messages)
-    except urllib.error.HTTPError as e:
-        return f"The AI provider returned an error ({e.code}). Check the key and model in chat_config.json."
-    except Exception as e:
-        return f"Chat error: {e}"
+    except Exception:
+        return "The AI provider could not complete the request. Check the key and model in chat_config.json."
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -167,19 +224,42 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(SITE), **kwargs)
 
     def send_head(self):
-        # GET and HEAD share this check. Only literal map routes reach the file handler.
         path = self.path.partition("?")[0]
         if path == "/":
             path = "/index.html"
         if path not in ("/index.html", "/_data/entities.json"):
             self.send_error(404)
             return None
-        asset = SITE / path[1:]
-        if not asset.is_file() or asset.resolve() != asset:
-            self.send_error(404)
-            return None
-        self.path = path
-        return super().send_head()
+        with ExitStack() as cleanup:
+            try:
+                stream = cleanup.enter_context(open_regular_file(SITE / path[1:]))
+            except OSError:
+                self.send_error(404)
+                return None
+            info = os.fstat(stream.fileno())
+            if self.is_not_modified(info.st_mtime):
+                self.send_response(304)
+                self.end_headers()
+                return None
+            self.send_response(200)
+            self.send_header("Content-Type", self.guess_type(path))
+            self.send_header("Content-Length", str(info.st_size))
+            self.send_header("Last-Modified", self.date_time_string(info.st_mtime))
+            self.end_headers()
+            cleanup.pop_all()  # The inherited GET and HEAD handlers close this stream.
+            return stream
+
+    def is_not_modified(self, mtime):
+        since = self.headers.get("If-Modified-Since")
+        if not since or "If-None-Match" in self.headers:
+            return False
+        try:
+            date = parsedate_to_datetime(since)
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=timezone.utc)
+            return date.tzinfo is timezone.utc and int(mtime) <= date.timestamp()
+        except (TypeError, ValueError, IndexError, OverflowError, OSError):
+            return False
 
     def do_POST(self):
         if self.path != "/api/chat":
@@ -205,7 +285,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    ready = config_available()
+    ready = load_config() is not None
     print(f"FXC Service Map on http://{HOST}:{PORT}/index.html")
     print(f"AI chat: {'configured' if ready else 'not configured (see README.md)'}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
