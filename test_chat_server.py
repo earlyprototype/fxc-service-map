@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib.request import HTTPRedirectHandler
 
 
 class ChatServerTests(unittest.TestCase):
@@ -24,7 +25,16 @@ class ChatServerTests(unittest.TestCase):
         self.script = self.checkout / source.name
         shutil.copyfile(source, self.script)
         (self.checkout / "index.html").write_bytes(b"map preview")
-        self.entities = b'{"categories": [], "pillars": [], "partners": [], "services": []}'
+        self.entities = json.dumps({
+            "categories": [{"id": "c", "label": "Category"}],
+            "pillars": [{"id": "p", "label": "Pillar"}],
+            "partners": [{"id": "lab", "label": "Lab", "contact": "Desk"}],
+            "services": [{
+                "id": "sample", "label": "Sample service", "partner": "lab",
+                "category": "c", "pillar": "p", "desc": "Sample summary",
+                "full": "Sample focus detail", "url": "https://example.invalid/service",
+            }],
+        }).encode("utf-8")
         (data / "entities.json").write_bytes(self.entities)
         self.config = self.home / ".config" / "fxc-service-map" / "chat_config.json"
         self.config.parent.mkdir(parents=True)
@@ -54,9 +64,11 @@ class ChatServerTests(unittest.TestCase):
         finally:
             connection.close()
 
-    def chat(self):
-        body = json.dumps({"messages": [{"role": "user", "text": "Find a service"}]})
-        status, reply = self.request("POST", "/api/chat", body)
+    def chat(self, focus=None):
+        payload = {"messages": [{"role": "user", "text": "Find a service"}]}
+        if focus is not None:
+            payload["focus"] = focus
+        status, reply = self.request("POST", "/api/chat", json.dumps(payload))
         self.assertEqual(status, 200)
         return json.loads(reply)["reply"]
 
@@ -182,6 +194,19 @@ class ChatServerTests(unittest.TestCase):
         self.assertNotIn("dummy-private", request.full_url)
         self.assertEqual(request.get_header("X-goog-api-key"), "dummy-private")
 
+    def test_provider_keys_stay_on_the_original_request(self):
+        self.urlopen.side_effect = OSError("Offline")
+        for provider, header in (("gemini", "X-goog-api-key"), ("anthropic", "X-api-key")):
+            with self.subTest(provider=provider):
+                with self.assertRaises(OSError):
+                    self.app["PROVIDERS"][provider]({"api_key": "dummy"}, "Sample prompt", [])
+                original = self.urlopen.call_args.args[0]
+                self.assertEqual(original.get_header(header), "dummy")
+                redirected = HTTPRedirectHandler().redirect_request(
+                    original, None, 302, "Found", {}, "https://example.invalid/redirect",
+                )
+                self.assertFalse(redirected.has_header(header))
+
     def test_directory_at_map_filename_is_unavailable(self):
         index = self.checkout / "index.html"
         index.unlink()
@@ -189,19 +214,52 @@ class ChatServerTests(unittest.TestCase):
         self.start_http()
         self.assertEqual(self.request("GET", "/")[0], 404)
 
-    def test_catalogue_route_rejects_a_linked_directory(self):
+    def test_multiply_linked_asset_is_unavailable(self):
+        (self.home / "map-copy.html").hardlink_to(self.checkout / "index.html")
+        self.start_http()
+        for method in ("GET", "HEAD"):
+            with self.subTest(method=method):
+                self.assertEqual(self.request(method, "/index.html")[0], 404)
+
+    def link_catalogue_directory(self):
         data = self.checkout / "_data"
-        (data / "entities.json").unlink()
-        data.rmdir()
-        (self.home / "entities.json").write_text("private data")
+        target = self.home / "sample-catalogue"
+        data.rename(target)
         if os.name == "nt":
             # A directory junction exercises the link check without symlink privileges.
             import _winapi
-            _winapi.CreateJunction(str(self.home), str(data))
+            _winapi.CreateJunction(str(target), str(data))
         else:
-            data.symlink_to(self.home, target_is_directory=True)
+            data.symlink_to(target, target_is_directory=True)
+
+    def test_catalogue_route_rejects_a_linked_directory(self):
+        self.link_catalogue_directory()
         self.start_http()
         self.assertEqual(self.request("GET", "/_data/entities.json")[0], 404)
+
+    def test_chat_rejects_linked_catalogue_at_startup(self):
+        self.link_catalogue_directory()
+        self.config.write_text('{"api_key":"dummy"}')
+        self.run_main()
+        self.start_http()
+        self.assertEqual(self.request("GET", "/"), (200, b"map preview"))
+        provider = Mock(return_value="offline reply")
+        with patch.dict(self.app["PROVIDERS"], {"gemini": provider}):
+            self.assertIn("catalogue", self.chat())
+            provider.assert_not_called()
+
+    def test_chat_rejects_linked_catalogue_for_focus(self):
+        self.config.write_text('{"api_key":"dummy"}')
+        self.start_http()
+        provider = Mock(return_value="offline reply")
+        with patch.dict(self.app["PROVIDERS"], {"gemini": provider}):
+            self.assertEqual(self.chat(["sample"]), "offline reply")
+            prompt = provider.call_args.args[1]
+            self.assertIn("Sample summary", prompt)
+            self.assertIn("Sample focus detail", prompt)
+            self.link_catalogue_directory()
+            self.assertIn("catalogue", self.chat(["sample"]))
+            provider.assert_called_once()
 
 
 if __name__ == "__main__":

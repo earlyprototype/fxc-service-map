@@ -26,8 +26,13 @@ HOST = "127.0.0.1"
 PORT = 8020
 
 
+def read_catalogue():
+    with open_regular_file(SITE / "_data" / "entities.json", public_asset=True) as stream:
+        return json.load(stream)
+
+
 def build_catalogue():
-    data = json.loads((SITE / "_data" / "entities.json").read_text(encoding="utf-8"))
+    data = read_catalogue()
     cat = {c["id"]: c["label"] for c in data["categories"]}
     pil = {p["id"]: p["label"] for p in data["pillars"]}
     par = {p["id"]: p for p in data["partners"]}
@@ -52,7 +57,7 @@ SYSTEM_PROMPT = (
     "- Prefer 1-3 strong matches over a long list. Say briefly why each fits.\n"
     "- If nothing fits well, say so plainly and point to the closest category or partner.\n"
     "- Be concise and practical. You are signposting, not selling.\n\n"
-    "CATALOGUE (73 live services):\n" + build_catalogue()
+    "CATALOGUE (73 live services):\n"
 )
 
 
@@ -65,7 +70,7 @@ def build_focus_block(focus_ids):
     """
     if not focus_ids:
         return ""
-    data = json.loads((SITE / "_data" / "entities.json").read_text(encoding="utf-8"))
+    data = read_catalogue()
     par = {p["id"]: p for p in data["partners"]}
     wanted = set(focus_ids)
     focus = [s for s in data["services"] if s["id"] in wanted]
@@ -126,8 +131,9 @@ PROVIDERS = {"gemini": call_gemini, "anthropic": call_anthropic}
 
 
 def _post_json(url, body, headers):
-    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"),
-                                 headers=headers, method="POST")
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST")
+    for name, value in headers.items():
+        req.add_unredirected_header(name, value)
     with urllib.request.urlopen(req, timeout=45) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -175,17 +181,26 @@ def _windows_handle_matches(stream, path):
     return name.value == expected
 
 
-def open_regular_file(path):
+def open_regular_file(path, *, public_asset=False):
     """Open an absolute canonical path and verify the file before reading any bytes."""
     opener = None if os.name == "nt" else _open_posix
     with ExitStack() as cleanup:
         stream = cleanup.enter_context(open(path, "rb", opener=opener))
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
             raise OSError("Expected a regular file")
+        if public_asset and info.st_nlink != 1:
+            raise OSError("Expected a single link to the public asset")
         if os.name == "nt" and not _windows_handle_matches(stream, path):
             raise OSError("Unexpected file location")
         cleanup.pop_all()
         return stream
+
+
+try:
+    CATALOGUE = build_catalogue()
+except OSError:
+    CATALOGUE = None
 
 
 def load_config():
@@ -213,7 +228,11 @@ def answer_question(messages, focus_ids):
         fn = PROVIDERS.get(cfg.get("provider", "gemini"))
         if not fn or not cfg.get("api_key") or "PASTE" in cfg.get("api_key", ""):
             return "⚙️ chat_config.json needs a valid \"provider\" (gemini or anthropic) and \"api_key\"."
-        system_prompt = SYSTEM_PROMPT + "\n\n" + build_focus_block(focus_ids)
+        try:
+            catalogue = CATALOGUE if CATALOGUE is not None else build_catalogue()
+            system_prompt = SYSTEM_PROMPT + catalogue + "\n\n" + build_focus_block(focus_ids)
+        except OSError:
+            return "The service catalogue is unavailable."
         return fn(cfg, system_prompt, messages)
     except Exception:
         return "The AI provider could not complete the request. Check the key and model in chat_config.json."
@@ -232,7 +251,7 @@ class Handler(SimpleHTTPRequestHandler):
             return None
         with ExitStack() as cleanup:
             try:
-                stream = cleanup.enter_context(open_regular_file(SITE / path[1:]))
+                stream = cleanup.enter_context(open_regular_file(SITE / path[1:], public_asset=True))
             except OSError:
                 self.send_error(404)
                 return None
