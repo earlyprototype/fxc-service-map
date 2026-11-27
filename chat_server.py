@@ -1,22 +1,14 @@
 #!/usr/bin/env python3
 """
-FXC Service Map dev server — with an optional, grounded AI "Service Finder" chat.
+FXC Service Map dev server with an optional AI Service Finder.
 
-Serves the repository root (the map) AND answers POST /api/chat by asking an LLM to match a
-client's need to a real FXC service. The model is given the FULL service catalogue
-(from _data/entities.json) and instructed to recommend only real services and
-cite the partner + live FXC page — so it signposts, it doesn't hallucinate.
+Serves index.html and _data/entities.json on loopback. POST /api/chat asks a
+provider to match a client's need to a service in the catalogue.
 
-Why full-catalogue-in-prompt and not a vector DB: 73 services is tiny. Stuffing the
-whole catalogue into the system prompt is simpler, cheaper, and more accurate than
-retrieval at this scale. Right tool for the size.
+The optional provider configuration lives in ~/.config/fxc-service-map/chat_config.json.
+The map works without it.
 
-Security: the API key lives in chat_config.json (gitignored) and is used server-side
-only — it never reaches the browser. No key / no config → the chat returns a friendly
-"not configured" note and the rest of the map works untouched.
-
-Run:  python chat_server.py      then open  http://localhost:8020/index.html
-Stdlib only — no Flask, no SDKs (calls provider REST APIs via urllib).
+Run python chat_server.py and open http://127.0.0.1:8020/.
 """
 
 import json
@@ -25,9 +17,9 @@ import urllib.error
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-ROOT = Path(__file__).parent
-SITE = ROOT
-CONFIG = ROOT / "chat_config.json"
+SITE = Path(__file__).resolve().parent
+CONFIG = Path.home() / ".config" / "fxc-service-map" / "chat_config.json"
+HOST = "127.0.0.1"
 PORT = 8020
 
 
@@ -145,15 +137,18 @@ def _last_user_text(messages):
     return ""
 
 
+def config_available():
+    return CONFIG.is_file() and SITE not in CONFIG.resolve().parents
+
+
 def answer_question(messages, focus_ids):
     question = _last_user_text(messages)
     if not question:
         return ("Ask me what a client needs — e.g. \"help with NIS2 compliance\", "
                 "\"we want to trial AI vision inspection\", or \"funding to buy a machine\".")
-    if not CONFIG.exists():
-        return ("⚙️ AI chat isn't configured yet. Copy chat_config.template.json to "
-                "chat_config.json, add your API key, and restart the server. (The rest of the map "
-                "works without it.)")
+    if not config_available():
+        return ("⚙️ AI chat isn't configured yet. See the local chat setup in README.md. "
+                "The map works without it.")
     try:
         cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
         fn = PROVIDERS.get(cfg.get("provider", "gemini"))
@@ -170,6 +165,21 @@ def answer_question(messages, focus_ids):
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(SITE), **kwargs)
+
+    def send_head(self):
+        # GET and HEAD share this check. Only literal map routes reach the file handler.
+        path = self.path.partition("?")[0]
+        if path == "/":
+            path = "/index.html"
+        if path not in ("/index.html", "/_data/entities.json"):
+            self.send_error(404)
+            return None
+        asset = SITE / path[1:]
+        if not asset.is_file() or asset.resolve() != asset:
+            self.send_error(404)
+            return None
+        self.path = path
+        return super().send_head()
 
     def do_POST(self):
         if self.path != "/api/chat":
@@ -195,7 +205,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    ready = CONFIG.exists()
-    print(f"FXC Service Map on http://localhost:{PORT}/index.html")
-    print(f"AI chat: {'configured' if ready else 'NOT configured (map works; see chat_config.template.json)'}")
-    ThreadingHTTPServer(("", PORT), Handler).serve_forever()
+    ready = config_available()
+    print(f"FXC Service Map on http://{HOST}:{PORT}/index.html")
+    print(f"AI chat: {'configured' if ready else 'not configured (see README.md)'}")
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

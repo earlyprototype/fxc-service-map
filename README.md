@@ -45,9 +45,9 @@ An optional chat that matches a plain-language client need to services. It is su
 catalogue and returns matching services by name, each with the delivering partner and the FXC
 page link, drawing only on the supplied catalogue.
 
-To enable: copy `chat_config.template.json` to `chat_config.json` (gitignored), add an API key
-(Gemini or Anthropic), and run `chat_server.py`. The key is used server-side only and is not sent
-to the browser.
+For the local `POST /api/chat` endpoint, create `.config/fxc-service-map` in your home directory.
+Copy `chat_config.template.json` there as `chat_config.json` and enter your Gemini or Anthropic
+API key. If you already have a `chat_config.json` in the repository, move it to that location.
 
 ## How it's built
 
@@ -61,10 +61,11 @@ to the browser.
 
 ```
 python chat_server.py
-# open http://localhost:8020/index.html
+# open http://127.0.0.1:8020/
 ```
 
-The map, search, and Copy Pathway Info run without a key. The AI chat requires a configured key.
+The development server listens on loopback and serves `index.html` and `_data/entities.json`.
+The map, search, and Copy Pathway Info run without a key.
 
 ## Data source
 
