@@ -1,4 +1,4 @@
-# FactoryXChange 2.0 — Service Map
+# FactoryXChange 2.0 Service Map
 
 Interactive pathfinding map with chat provided by a Cloudflare Worker.
 

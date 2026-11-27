@@ -149,6 +149,10 @@ let pillarOn = {};          // pillarId -> bool (legend checkboxes; unticked = h
 let svcPillar = {};         // serviceId -> pillarId (for pillar-driven hide)
 
 init().catch(error => {
+  if (network) {
+    network.destroy();
+    network = null;
+  }
   console.error("Could not load the service map", error);
   document.getElementById("mapStatus").textContent = "Could not load the service map. Reload the page to try again.";
 });
@@ -157,6 +161,8 @@ async function init() {
   const response = await fetch("_data/entities.json");
   if (!response.ok) throw new Error(`Catalogue request failed (${response.status})`);
   data = await response.json();
+  document.getElementById("subtitle").textContent = data.meta?.subtitle || "";
+  const controls = document.querySelectorAll("#reset, #search, #toggleSecondary, #copyCtx, #askAi, #chatSend, #panelClose");
   const built = buildGraph();
   nodes = new vis.DataSet(built.nodes);
   edges = new vis.DataSet(built.edges);
@@ -176,24 +182,22 @@ async function init() {
   network.on("dragStart", () => { clearTimeout(calmTimer); network.setOptions({ physics: true }); });
   network.on("dragEnd", () => { clearTimeout(calmTimer); calmTimer = setTimeout(calm, 1200); });
   network.on("click", p => { if (p.nodes.length) selectNode(p.nodes[0]); else clearFocus(); });
-  document.getElementById("subtitle").textContent = data.meta.subtitle || "";
   buildPillarLegend();
-  for (const id of ["reset", "search", "toggleSecondary", "copyCtx", "askAi", "chatSend", "panelClose"]) {
-    document.getElementById(id).disabled = false;
-  }
+  for (const control of controls) control.disabled = false;
   document.getElementById("mapStatus").hidden = true;
 }
 
 function buildPillarLegend() {
   const box = document.getElementById("pillars");
-  data.pillars.forEach(p => {
+  const chips = data.pillars.map(p => {
     pillarOn[p.id] = true;
     const el = document.createElement("label");
     el.className = "chip";
     el.innerHTML = `<input type="checkbox" checked data-pillar="${p.id}"><span class="dot" style="background:${p.color}"></span>${p.label}`;
     el.querySelector("input").addEventListener("change", e => { pillarOn[p.id] = e.target.checked; applyPillarVisibility(); });
-    box.appendChild(el);
+    return el;
   });
+  box.append(...chips);
 }
 
 function buildGraph() {

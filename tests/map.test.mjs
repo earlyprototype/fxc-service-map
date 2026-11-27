@@ -6,16 +6,23 @@ import { runInNewContext } from "node:vm";
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const catalogue = readFileSync(new URL("../_data/entities.json", import.meta.url), "utf8");
+const firstService = JSON.parse(catalogue).services[0];
 const graphControls = ["reset", "search", "toggleSecondary", "askAi", "copyCtx", "panelClose", "chatSend"];
 
-// Only the DOM and vis APIs used by startup, Reset and chat are needed here.
+// Only the DOM and vis APIs used by startup, selection, Reset and chat are needed here.
 class Element {
   children = [];
   listeners = {};
-  classList = { add() {}, remove() {} };
+  classes = new Set();
+  classList = {
+    add: name => this.classes.add(name),
+    remove: name => this.classes.delete(name),
+    contains: name => this.classes.has(name),
+  };
   value = "";
   textContent = "";
   appendChild(child) { this.children.push(child); }
+  append(...children) { this.children.push(...children); }
   querySelector(selector) {
     assert.equal(selector, "input");
     return new Element();
@@ -24,7 +31,10 @@ class Element {
   click() { if (!this.disabled) this.onclick?.(); }
 }
 
-function openPage({ loadCatalogue = () => new Response(catalogue), worker, graphAvailable = true } = {}) {
+function openPage({
+  loadCatalogue = () => new Response(catalogue), worker, graphAvailable = true,
+  createElement = () => new Element(),
+} = {}) {
   const elements = {};
   for (const [tag, id] of html.matchAll(/<[^<>]+\bid="([^"]+)"[^<>]*>/g)) {
     elements[id] = Object.assign(new Element(), {
@@ -34,6 +44,7 @@ function openPage({ loadCatalogue = () => new Response(catalogue), worker, graph
   }
   const requests = [];
   let fits = 0;
+  let canvas;
   const vis = {
     DataSet: class {
       constructor(items) { this.ids = items.map(item => item.id); }
@@ -41,15 +52,30 @@ function openPage({ loadCatalogue = () => new Response(catalogue), worker, graph
       update() {}
     },
     Network: class {
+      constructor(container) {
+        canvas = new Element();
+        container.appendChild(canvas);
+      }
       once() {}
-      on() {}
+      on(type, listener) {
+        if (type === "click") canvas.onclick = () => listener({ nodes: [firstService.id] });
+      }
+      getConnectedNodes() { return []; }
+      getConnectedEdges() { return []; }
+      selectNodes() {}
       fit() { fits++; }
+      destroy() {
+        canvas.onclick = null;
+        elements.graph.children.length = 0;
+      }
     },
   };
   runInNewContext(script, {
     document: {
       getElementById: id => elements[id],
-      createElement: () => new Element(),
+      createElement,
+      querySelectorAll: selector => selector === "#panel a.node-link" ? [] :
+        selector.split(", ").map(id => elements[id.slice(1)]),
     },
     vis: graphAvailable ? vis : undefined,
     fetch: async (url, options) => {
@@ -62,6 +88,7 @@ function openPage({ loadCatalogue = () => new Response(catalogue), worker, graph
   });
   return {
     elements, requests, fits: () => fits,
+    get canvas() { return canvas; },
     send(question) {
       elements.chatInput.value = question;
       return elements.chatForm.listeners.submit({ preventDefault() {} });
@@ -89,6 +116,37 @@ test("graph controls become usable after the catalogue and graph are ready", asy
   assert.ok(page.elements.pillars.children.length > 0);
   page.elements.reset.click();
   assert.equal(page.fits(), 1);
+});
+
+test("a catalogue without metadata opens service details with a blank subtitle", async () => {
+  const data = JSON.parse(catalogue);
+  delete data.meta;
+  const page = openPage({ loadCatalogue: () => Response.json(data) });
+  await settled();
+  assert.equal(page.elements.mapStatus.hidden, true);
+  assert.equal(page.elements.subtitle.textContent, "");
+  page.canvas.click();
+  assert.equal(page.elements.panel.classList.contains("open"), true);
+  assert.ok(page.elements.panelBody.innerHTML.includes(firstService.label));
+  assert.equal(page.elements.panelClose.disabled, false);
+});
+
+test("a canvas click after failed legend setup leaves the panel closed and controls disabled", async () => {
+  let labels = 0;
+  const page = openPage({ createElement(tag) {
+    if (tag === "label" && ++labels === 2) throw new Error("Pillar control creation failed");
+    return new Element();
+  } });
+  await settled();
+  assert.match(page.elements.mapStatus.textContent, /could not load/i);
+  assert.equal(page.elements.mapStatus.hidden, false);
+  page.canvas.click();
+  assert.equal(page.elements.panel.classList.contains("open"), false);
+  assert.equal(page.elements.graph.children.length, 0);
+  assert.equal(page.elements.pillars.children.length, 0);
+  for (const id of graphControls) assert.equal(page.elements[id].disabled, true, id);
+  page.elements.reset.click();
+  assert.equal(page.fits(), 0);
 });
 
 for (const [name, options] of [
