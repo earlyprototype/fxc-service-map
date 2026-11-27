@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FactoryXChange 2.0 — Service Map</title>
-<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 <style>
   :root {
     --ink: #1f2933; --muted: #6b7885; --line: #e2e7ec;
@@ -26,9 +25,11 @@
   button#askAi:hover { background: #e9f0f3; }
   label.toggle { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #cfe1e6; cursor: pointer; user-select: none; }
   label.toggle input { accent-color: #58b4c4; cursor: pointer; }
+  .tool:disabled, #search:disabled, #chatSend:disabled { opacity: .6; cursor: default; }
 
   #main { position: relative; overflow: hidden; }
   #graph { position: absolute; inset: 0; background: var(--bg); }
+  #mapStatus { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 7; width: max-content; max-width: calc(100% - 24px); margin: 0; padding: 12px 16px; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
 
   /* pillar filter chips */
   #pillars { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 6px; background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.06); z-index: 5; }
@@ -101,16 +102,17 @@
       <h1>FactoryXChange 2.0 — Service Map</h1>
       <div class="sub" id="subtitle"></div>
     </div>
-    <button class="tool" id="reset">Reset view</button>
+    <button class="tool" id="reset" disabled>Reset view</button>
     <div class="tools">
-      <input id="search" type="text" placeholder="Search a need, service, or partner…">
-      <label class="toggle"><input type="checkbox" id="toggleSecondary" checked> Secondary categories</label>
-      <button class="tool" id="askAi">Ask AI</button>
-      <button class="tool" id="copyCtx">Copy Pathway Info</button>
+      <input id="search" type="text" placeholder="Search a need, service, or partner…" disabled>
+      <label class="toggle"><input type="checkbox" id="toggleSecondary" checked disabled> Secondary categories</label>
+      <button class="tool" id="askAi" disabled>Ask AI</button>
+      <button class="tool" id="copyCtx" disabled>Copy Pathway Info</button>
     </div>
   </header>
   <div id="main">
     <div id="graph"></div>
+    <p id="mapStatus" role="status">Loading the service map…</p>
     <div id="pillars"><div class="lg-title">Pillar (service colour) — untick to hide</div></div>
     <div id="key">
       <div class="k"><span class="swatch-hub"></span> Category hub</div>
@@ -119,20 +121,21 @@
       <div class="k"><span class="line-dash"></span> soft category</div>
       <div class="k"><span class="line-light"></span> delivered by</div>
     </div>
-    <div id="panel"><button class="close" id="panelClose">×</button><div class="pad" id="panelBody"></div></div>
+    <div id="panel"><button class="close" id="panelClose" disabled>×</button><div class="pad" id="panelBody"></div></div>
     <div id="chat">
       <header><div><h3>FXC Service Finder</h3><div class="sub2">Click a Service, Category or FXC Partner to Discuss.</div></div><button class="cclose" id="chatClose">×</button></header>
       <div id="chatMsgs"></div>
-      <form id="chatForm"><textarea id="chatInput" rows="1" placeholder="What does your client need?"></textarea><button id="chatSend" type="submit">Send</button></form>
+      <form id="chatForm"><textarea id="chatInput" rows="1" placeholder="What does your client need?"></textarea><button id="chatSend" type="submit" disabled>Send</button></form>
     </div>
     <div id="toast"></div>
     <a id="ghBtn" href="https://github.com/earlyprototype" target="_blank" rel="noopener" title="Built by earlyprototype — view on GitHub"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 012-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
   </div>
 </div>
 
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <script>
 const CHAT_WORKER_URL = "https://fxc-service-chat.earlyprototype.workers.dev";  // set to your deployed Cloudflare Worker URL; empty = use local /api/chat
-let chatHistory = [];        // multi-turn transcript sent to the chat endpoint (seed greeting is UI-only, not in here)
+const chatHistory = [];      // Completed question/reply pairs. The greeting is UI-only.
 const HUB = "#16697a", PARTNER = "#4a5a6a";
 const PIN_PARTNER = "par-cspark";  // Creative Spark floats to the top of category service lists
 const FADE_NODE = "#e6ebee", FADE_FONT = "#c2cbd1";
@@ -145,12 +148,21 @@ let curNodeSet = null;      // null = no focus/search; else the set of in-view n
 let pillarOn = {};          // pillarId -> bool (legend checkboxes; unticked = hidden)
 let svcPillar = {};         // serviceId -> pillarId (for pillar-driven hide)
 
-init();
+init().catch(error => {
+  if (network) {
+    network.destroy();
+    network = null;
+  }
+  console.error("Could not load the service map", error);
+  document.getElementById("mapStatus").textContent = "Could not load the service map. Reload the page to try again.";
+});
 
 async function init() {
-  data = await (await fetch("_data/entities.json")).json();
-  document.getElementById("subtitle").textContent = data.meta.subtitle || "";
-  buildPillarLegend();
+  const response = await fetch("_data/entities.json");
+  if (!response.ok) throw new Error(`Catalogue request failed (${response.status})`);
+  data = await response.json();
+  document.getElementById("subtitle").textContent = data.meta?.subtitle || "";
+  const controls = document.querySelectorAll("#reset, #search, #toggleSecondary, #copyCtx, #askAi, #chatSend, #panelClose");
   const built = buildGraph();
   nodes = new vis.DataSet(built.nodes);
   edges = new vis.DataSet(built.edges);
@@ -170,18 +182,22 @@ async function init() {
   network.on("dragStart", () => { clearTimeout(calmTimer); network.setOptions({ physics: true }); });
   network.on("dragEnd", () => { clearTimeout(calmTimer); calmTimer = setTimeout(calm, 1200); });
   network.on("click", p => { if (p.nodes.length) selectNode(p.nodes[0]); else clearFocus(); });
+  buildPillarLegend();
+  for (const control of controls) control.disabled = false;
+  document.getElementById("mapStatus").hidden = true;
 }
 
 function buildPillarLegend() {
   const box = document.getElementById("pillars");
-  data.pillars.forEach(p => {
+  const chips = data.pillars.map(p => {
     pillarOn[p.id] = true;
     const el = document.createElement("label");
     el.className = "chip";
     el.innerHTML = `<input type="checkbox" checked data-pillar="${p.id}"><span class="dot" style="background:${p.color}"></span>${p.label}`;
     el.querySelector("input").addEventListener("change", e => { pillarOn[p.id] = e.target.checked; applyPillarVisibility(); });
-    box.appendChild(el);
+    return el;
   });
+  box.append(...chips);
 }
 
 function buildGraph() {
@@ -378,25 +394,31 @@ function renderAnswer(t) {
 }
 document.getElementById("chatForm").addEventListener("submit", async e => {
   e.preventDefault();
-  const inp = document.getElementById("chatInput"); const q = inp.value.trim(); if (!q) return;
+  const send = document.getElementById("chatSend");
+  const inp = document.getElementById("chatInput");
+  const q = inp.value.trim();
+  if (!q || send.disabled) return;
+  send.disabled = true;
   addMsg("user", q); inp.value = "";
-  chatHistory.push({ role: "user", text: q });
+  const question = { role: "user", text: q };
   const thinking = addMsg("ai", "…");
   try {
     const endpoint = CHAT_WORKER_URL || "/api/chat";
-    const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: chatHistory.slice(-8), focus: activeServices().map(s => s.id) }) });
+    const messages = chatHistory.concat(question).slice(-8);
+    const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages, focus: activeServices().map(s => s.id) }) });
     const j = await r.json();
-    if (j.reply) {
-      chatHistory.push({ role: "assistant", text: j.reply });
+    if (r.ok && typeof j.reply === "string" && j.reply.trim()) {
       thinking.innerHTML = renderAnswer(j.reply);
+      if (j.limited !== true) {
+        chatHistory.push(question, { role: "assistant", text: j.reply });
+      }
     } else {
-      // Worker returned an error (not a reply) — surface it and roll back this
-      // failed turn so it doesn't linger in history and re-break the next send.
-      chatHistory.pop();
-      thinking.textContent = j.error ? `Couldn't send that — ${j.error}` : "No response — please try again.";
+      thinking.textContent = j.error ? `Couldn't send that. ${j.error}` : "No reply received. Please try again.";
     }
-  } catch (err) {
-    thinking.textContent = "Chat unavailable — start the chat server:  python chat_server.py";
+  } catch {
+    thinking.textContent = "Chat is unavailable. Please try again.";
+  } finally {
+    send.disabled = false;
   }
   document.getElementById("chatMsgs").scrollTop = 1e9;
 });
