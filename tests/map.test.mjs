@@ -194,6 +194,30 @@ for (const [name, failure, message] of [
   });
 }
 
+test("chat displays a limited Worker reply and retries the same question once", async () => {
+  const notice = "Chat is busy. Please try again.";
+  const replies = [
+    { reply: "First answer", limited: false },
+    { reply: notice, limited: true },
+    { reply: "Second answer" },
+  ];
+  const page = openPage({ worker: () => Response.json(replies.shift()) });
+  await settled();
+  await page.send("First question");
+  await page.send("Second question");
+  assert.equal(page.elements.chatMsgs.children.at(-1).innerHTML, notice);
+
+  await page.send("Second question");
+  assert.deepEqual(page.requests[2], {
+    messages: [
+      { role: "user", text: "First question" },
+      { role: "assistant", text: "First answer" },
+      { role: "user", text: "Second question" },
+    ],
+    focus: JSON.parse(catalogue).services.map(s => s.id),
+  });
+});
+
 test("a second submit while waiting sends once and preserves the next draft", async () => {
   let finishReply;
   const page = openPage({ worker: () => new Promise(resolve => { finishReply = resolve; }) });

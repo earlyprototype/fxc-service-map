@@ -409,7 +409,9 @@ document.getElementById("chatForm").addEventListener("submit", async e => {
     const j = await r.json();
     if (r.ok && typeof j.reply === "string" && j.reply.trim()) {
       thinking.innerHTML = renderAnswer(j.reply);
-      chatHistory.push(question, { role: "assistant", text: j.reply });
+      if (j.limited !== true) {
+        chatHistory.push(question, { role: "assistant", text: j.reply });
+      }
     } else {
       thinking.textContent = j.error ? `Couldn't send that. ${j.error}` : "No reply received. Please try again.";
     }
