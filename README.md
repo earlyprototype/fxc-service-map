@@ -45,9 +45,10 @@ An optional chat that matches a plain-language client need to services. It is su
 catalogue and returns matching services by name, each with the delivering partner and the FXC
 page link, drawing only on the supplied catalogue.
 
-For the local `POST /api/chat` endpoint, create `.config/fxc-service-map` in your home directory.
-Copy `chat_config.template.json` there as `chat_config.json` and enter your Gemini or Anthropic
-API key. If you already have a `chat_config.json` in the repository, move it to that location.
+The local `POST /api/chat` endpoint reads `~/.config/fxc-service-map/chat_config.json`.
+Create `~/.config/fxc-service-map` if needed. If you have a `chat_config.json` in the
+repository, move it there. For a new configuration, copy `chat_config.template.json` there
+as `chat_config.json` and enter your Gemini or Anthropic API key.
 
 ## How it's built
 
@@ -77,5 +78,5 @@ sitemap. Category, secondary category, and pillar for each service are assigned 
 
 - Category, secondary-category, and pillar assignments are defined in the build script.
 - The interface targets desktop and is not yet adapted for mobile.
-- The AI chat requires an API key and the `chat_server.py` backend running; the rest of the map
-  is static.
+- The bundled map sends Ask AI requests to the configured Cloudflare Worker, even when you
+  serve it locally.
